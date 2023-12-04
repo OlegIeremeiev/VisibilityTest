@@ -10,9 +10,9 @@ class ImageRegulator:
 
     def __init__(self):
         data = dict()
-        data['version'] = 0.21
-        data['app_version'] = 0.2
-        data['limit'] = 20
+        data['version'] = 0.3
+        data['app_version'] = 0.3
+        data['limit'] = 30
 
         # eval statistics by the experiments
         data = self.eval_statistics(data)
