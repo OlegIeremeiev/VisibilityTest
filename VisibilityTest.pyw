@@ -1,22 +1,26 @@
 import threading
-from tkinter import Tk, Toplevel, Frame, Label, Button, Entry, StringVar, EW, NSEW, NS, NW, E, W, \
-    N, S, Canvas, RIDGE, DISABLED, NORMAL, END, Scale, IntVar, BooleanVar, HORIZONTAL, Checkbutton, RAISED, SUNKEN
+import webbrowser
+from tkinter import Tk, Toplevel, Frame, Label, Button, Entry, StringVar, NSEW, N, S, E, W, \
+    Canvas, RIDGE, DISABLED, NORMAL, END, Scale, IntVar, HORIZONTAL, Checkbutton, RAISED, SUNKEN
 from tkinter import ttk, font
 import yaml
 import re
 import os, platform
 from pathlib import Path
 from PIL import Image, ImageTk
-# import _thread
 from abc import ABC, abstractmethod
 import random
 import time
 import requests
-import asyncio
+# import asyncio
 
 
 class GUI:
     cur_lang = 'ua'
+    version = 0.1
+    conf_version: float
+    r_version: float = None
+    r_conf_version: float
 
     def __init__(self):
         """Tkinter application class initialization
@@ -28,18 +32,17 @@ class GUI:
         self.tk.grid()
         self.tk.protocol("WM_DELETE_WINDOW", lambda parent=self.tk: CustomDialog.quit_dialog(parent, self.cur_lang))
         self.tk.resizable(False, False)
-
-        self.font = font.nametofont('TkDefaultFont')
+        # self.font = font.nametofont('TkDefaultFont')
         # self.font['size'] = self.font['size'] - 1
 
         # main frame
         self.imgFrame = ImageFrame(self.tk)
         self.imgFrame.init_lang_action(self)
         self.experiment = Experiment(self)
-        self.__app_mode_switcher()
-
+        self.lock_buttons(True)
         self.__check_folders()
-        self.__load_tasks: asyncio.Future|None = None
+        self.is_loaded_survey = False
+        # self.__load_tasks: asyncio.Future|None = None
 
     @staticmethod
     def __check_folders():
@@ -59,14 +62,19 @@ class GUI:
 
     def __begin_action(self):
         surveys = list(filter(os.path.isfile, Path('results').glob('*survey.yaml')))
+        self.is_filling_survey = False
         if not surveys:
             # demo mode
+            self.is_filling_survey = True
             self.__survey_dialog(self.tk)
-        else:
+            # self.imgFrame.tk.title(self.imgFrame.language[self.cur_lang]['title']+"[ demo ]")
+
+        if surveys and not self.is_loaded_survey:
             self.__survey_parse(YAML.read(surveys[0]))
             self.experiment.mode = 'full'
 
-        self.load_dialog(self.tk)
+        if not self.is_filling_survey:
+            self.load_dialog(self.tk)
 
     def load_dialog(self, parent_tk):
         win = CustomDialog.load_dialog(parent_tk, self.cur_lang)
@@ -76,72 +84,39 @@ class GUI:
              'load_1': {'command': lambda: threading.Thread(target=self.__load_start).start()},
              'load_all': {'command': lambda: threading.Thread(target=self.__load_start, args=(True,)).start()}})
 
-        # local_config = list(filter(os.path.isfile, Path('images').glob('imageconf*.yaml')))
         local_images = list(filter(os.path.isfile, Path('images').glob('I*.bmp')))
+        local_config = list(filter(os.path.isfile, Path('images').glob('imageconf*.yaml')))
+        if local_config:
+            conf = YAML.read(local_config[0])
+            total = len(conf['images']) + len(conf['references'])
+        else:
+            total = len(local_images)
+            # total = 3025
         num = len(local_images)
-        total = 100  # 1725
         self.load_frame.configure(
             {'lbl1': {'text': self.load_frame.language[self.cur_lang]['progress']
-            .format(num, total, round(num / total, 2) * 100)},
+                                  .format(num, total, round(num / total, 2) * 100)},
              'progress': {'value': round(num / total, 2) * 100}})
         self.is_loading = False
         self.is_cancel = False
 
-
     def __load_start(self, is_all: bool = False):
-
         if not self.load_frame.isinternet.get():
             CustomDialog.ok_dialog(self.tk, self.cur_lang, 'noinettitle', 'noinetmessage')
             return
-
-
-        # print(asyncio.all_tasks())s
+        # print(asyncio.all_tasks())
         if not self.is_loading:
-            self.__sync_button_update(is_all, 'stop')
+            self.__load_button_update(is_all, 'stop')
             self.is_cancel = False
             self.is_loading = True
-            self.__noasync_tasks_manager(is_all)
+            self.__load_tasks_manager(is_all)
             # asyncio.run(self.__async_tasks_manager(is_all))
-            self.__sync_button_update(is_all, 'load_button')
+            self.__load_button_update(is_all, 'load_button')
             self.is_loading = False
         else:
-            # elif len(asyncio.all_tasks()) > 0:
             self.is_cancel = True
-            # self.__sync_button_update(is_all, 'load_button')
-            # self.is_loading = False
-            # self.is_cancel = False
-        #
-        # if self.exp_mode in ['demo', 'full']:
-        #     self.__start_experiment()
-        # todo
 
-        # +1. получить локальный конфиг
-        # +1а. посмотреть текущие изображения и вывести % загрузки в прогресбар
-        # +2а. если есть список файлов с облака
-        # +2б. или если разрешен интернет, получить список файлов
-        # +2в. найти там конфиг и сравнить с текущим (версию в названии файла)
-        # +2г. заменить с бекапом
-        # +3 загрузить конфиг
-        # 3а. создать 3 категории: черный (выше лимита), менее - отсортировать и разделить пополам
-        # (75% из редких и 25% из средних),
-        # если недостаточно, брать из черного списка
-        # кли нет конфига, то рандомно
-        # +4. определить, сколько надо загружать
-        # +4а. обновить метки панели
-        # +-5. начать асинхронную загрузку
-        # +-5а. ограничить 10 файлов одновременно, при отмене прекратить новые
-
-
-
-    def __noasync_tasks_manager(self, is_all: bool):
-
-        if self.network is None or not self.network.json:
-            # get file list from cloud
-            self.__get_cloud_file_list()
-
-            # update config
-            self.__async_config_update()
-
+    def __load_tasks_manager(self, is_all: bool):
         if not is_all:
             if not self.__init_experiment():
                 return
@@ -160,7 +135,6 @@ class GUI:
             local_im = set([item.name for item in list(filter(os.path.isfile, Path('images').glob('I*.bmp')))])
 
         load_list = list(set(dist_im) - set(local_im))
-
         total = len(dist_im)
         exist = total - len(load_list)
         self.__sync_gui_update(exist, total, is_all)
@@ -190,7 +164,7 @@ class GUI:
     #     success = self.experiment.init_experiment()
     #     if not success:
     #         print('not init experiment')
-    #         # todo
+    #         # to do
     #         return
     #
     #     dist_im = [item[0] for item in self.experiment.pairs]
@@ -266,12 +240,7 @@ class GUI:
     #     #     # print(f'exist {exist}, total: {len(dist_im)}')
     #     self.__sync_gui_update(exist, len(dist_im))
 
-    def __get_cloud_file_list(self):
-        self.network = Network()
-        self.network.get_json()
-        self.network.get_basics()
-
-    def __sync_button_update(self, is_all: bool, text_type: str):
+    def __load_button_update(self, is_all: bool, text_type: str):
         if is_all:
             self.load_frame.configure(
                 {'load_all': {'text': self.load_frame.language[self.cur_lang][text_type]}})
@@ -294,7 +263,7 @@ class GUI:
                 {'lbl3': {'text': self.load_frame.language[self.cur_lang]['load_all']
                                       .format(round((total-current) * 589878 / 1024 / 1024 / 1024, 2))}})
 
-    def __async_config_update(self):
+    def __config_update(self):
         # async
         pattern = r'imageconf_\d{1,2}\.\d{1,2}\.yaml'
 
@@ -304,12 +273,15 @@ class GUI:
         local_config = list(filter(os.path.isfile, Path('images').glob('imageconf*.yaml')))
         l_version = re.search(r'\d{1,2}\.\d{1,2}', local_config[0].name).group(0)
         r_version = re.search(r'\d{1,2}\.\d{1,2}', remote_config[0]).group(0)
+        self.conf_version = float(l_version)
+        self.r_conf_version = float(r_version)
 
         if float(l_version) < float(r_version):
             os.rename(os.path.join('images', local_config[0].name),
                       os.path.join('images', local_config[0].name + '.bak'))
             # await
             self.network.download_file(file_name=remote_config[0], file_id=self.network.yaml_files[remote_config[0]])
+
 
     def __get_downloadable_list(self) -> (list[str], list[str]):
         if self.experiment.status != 'init':
@@ -325,7 +297,8 @@ class GUI:
     def __survey_dialog(self, parent_tk):
         win = CustomDialog.survey_dialog(parent_tk, self.cur_lang)
         survey = SurveyFrame(win, self.cur_lang)
-        survey.set_button_action(lambda: self.__survey_save(win, survey.get_data()))
+        survey.configure({'button': {'command': lambda: self.__survey_save(win, survey.get_data())}})
+        # survey.set_button_action(lambda: self.__survey_save(win, survey.get_data()))
 
     def __survey_save(self, dialog, data: dict):
         """
@@ -341,29 +314,37 @@ class GUI:
             dialog.destroy()
             self.experiment.mode = 'demo'
             self.__survey_parse(data)
+            self.is_filling_survey = False
 
     def __survey_parse(self, data: dict):
         self.imgFrame.configure({'name': {'text': data['name']}})
+        self.is_loaded_survey = True
         # todo
 
-    def __app_mode_switcher(self):
-        if self.experiment.mode == "none":
+    def lock_buttons(self, state: bool):
+        if state:
             self.imgFrame.configure({'b1': {'state': DISABLED}, 'b2': {'state': DISABLED},
                                      'b3': {'state': DISABLED}, 'b4': {'state': DISABLED}})
             self.imgFrame.configure({'b5': {'text': self.imgFrame.language[self.imgFrame.cur_lang]['start'],
-                                            'command': lambda: self.__begin_action()}})
+                                            'command': lambda: self.__begin_action(), 'state': NORMAL}})
         else:
             # demo or full
             self.imgFrame.configure({'b1': {'state': NORMAL}, 'b2': {'state': NORMAL},
                                      'b3': {'state': NORMAL}, 'b4': {'state': NORMAL}})
-            self.imgFrame.configure({'b5': {'text': self.imgFrame.language[self.imgFrame.cur_lang]['b5'],
-                                            'command': lambda: self.__begin_action()}})
+            self.imgFrame.configure({'b5': {'text': self.imgFrame.language[self.imgFrame.cur_lang]['b5']}})
 
     def start(self):
         self.tk.mainloop()
 
 
     def __init_experiment(self) -> bool:
+        if self.network is None or not self.network.json:
+            self.network = Network()
+            self.network.get_json()
+            self.network.get_basics()
+            # update config
+            self.__config_update()
+
         if self.experiment.status != 'init':
             success = self.experiment.init_experiment()
             if not success:
@@ -390,7 +371,7 @@ class GUI:
             return
 
         print(f"start experiment ({self.experiment.mode})")
-        self.__app_mode_switcher()
+        self.lock_buttons(False)
         win.destroy()
         # self.experiment.mode == "demo" / "full"
         self.experiment.start_experiment()
@@ -412,9 +393,10 @@ class CustomFrame(ABC):
     def get_frame(self) -> Frame:
         pass
 
-    @abstractmethod
     def configure(self, widgets_config: dict) -> None:
-        pass
+        widgets = widgets_config.keys()
+        for widget in widgets:
+            getattr(self, widget).config(**widgets_config[widget])
 
 
 class SurveyFrame(CustomFrame):
@@ -463,62 +445,62 @@ class SurveyFrame(CustomFrame):
         super()._layout(frame)
         self.labels = dict()
         Label(frame, text=self.language[self.cur_lang]['intro'], anchor="w", justify="left") \
-            .grid(row=0, column=0, columnspan=2, sticky=EW, padx=5, pady=2)
+            .grid(row=0, column=0, columnspan=2, sticky=E+W, padx=5, pady=2)
 
         self.labels['name'] = Label(frame, text=self.language[self.cur_lang]['name'], anchor="w", justify="left")
-        self.labels['name'].grid(row=1, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['name'].grid(row=1, column=0, sticky=E+W, padx=5, pady=2)
         self.name = EntryWithHint(frame, hint=self.language[self.cur_lang]['name_hint'])
         self.name.config(width=30)
-        self.name.grid(row=1, column=1, sticky=EW, padx=5, pady=2)
+        self.name.grid(row=1, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['age'] = Label(frame, text=self.language[self.cur_lang]['age'], anchor="w", justify="left")
-        self.labels['age'].grid(row=2, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['age'].grid(row=2, column=0, sticky=E+W, padx=5, pady=2)
         self.age = Scale(frame, variable=IntVar(value=0), from_=0, to=100, orient=HORIZONTAL)
         # self.age = Spinbox(frame, from_=10, to=100, width=10, textvariable=StringVar(value=str(10)))
-        self.age.grid(row=2, column=1, sticky=EW, padx=5, pady=2)
+        self.age.grid(row=2, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['device_type'] = Label(frame, text=self.language[self.cur_lang]['device_type'][0], anchor="w",
                                            justify="left")
-        self.labels['device_type'].grid(row=3, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['device_type'].grid(row=3, column=0, sticky=E+W, padx=5, pady=2)
         def_device = StringVar(value=self.language[self.cur_lang]['device_type'][1])
         self.device_type = ttk.Combobox(frame, textvariable=def_device,
                                         values=self.language[self.cur_lang]['device_type'][1:], width=15,
                                         state="readonly")
         # lst = Listbox(frame, listvariable=Variable(value=), width=15)
-        self.device_type.grid(row=3, column=1, sticky=EW, padx=5, pady=2)
+        self.device_type.grid(row=3, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['device'] = Label(frame, text=self.language[self.cur_lang]['device'], anchor="w", justify="left")
-        self.labels['device'].grid(row=4, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['device'].grid(row=4, column=0, sticky=E+W, padx=5, pady=2)
         self.device = Entry(frame, width=20)
-        self.device.grid(row=4, column=1, sticky=EW, padx=5, pady=2)
+        self.device.grid(row=4, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['screen_size'] = Label(frame, text=self.language[self.cur_lang]['screen_size'], anchor="w",
                                            justify="left")
-        self.labels['screen_size'].grid(row=5, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['screen_size'].grid(row=5, column=0, sticky=E+W, padx=5, pady=2)
         self.screen = Entry(frame, width=15)
-        self.screen.grid(row=5, column=1, sticky=EW, padx=5, pady=2)
+        self.screen.grid(row=5, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['resolution'] = Label(frame, text=self.language[self.cur_lang]['resolution'], anchor="w",
                                           justify="left")
-        self.labels['resolution'].grid(row=6, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['resolution'].grid(row=6, column=0, sticky=E+W, padx=5, pady=2)
         self.resol = EntryWithHint(frame, hint=self.language[self.cur_lang]['resolution_hint'])  # split by x_ua, x_en
         self.resol.config(width=15)
-        self.resol.grid(row=6, column=1, sticky=EW, padx=5, pady=2)
+        self.resol.grid(row=6, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['luminance'] = Label(frame, text=self.language[self.cur_lang]['luminance'], anchor="w",
                                          justify="left")
-        self.labels['luminance'].grid(row=7, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['luminance'].grid(row=7, column=0, sticky=E+W, padx=5, pady=2)
         self.lum = Scale(frame, variable=IntVar(value=-1), from_=-1, to=100, orient=HORIZONTAL)
         # self.lum = Spinbox(frame, from_=-1, to=100, width=10, textvariable=StringVar(value=str(-1)))
-        self.lum.grid(row=7, column=1, sticky=EW, padx=5, pady=2)
+        self.lum.grid(row=7, column=1, sticky=E+W, padx=5, pady=2)
 
         self.labels['light'] = Label(frame, text=self.language[self.cur_lang]['light'][0], anchor="w", justify="left")
-        self.labels['light'].grid(row=8, column=0, sticky=EW, padx=5, pady=2)
+        self.labels['light'].grid(row=8, column=0, sticky=E+W, padx=5, pady=2)
         self.light = ttk.Combobox(frame, values=self.language[self.cur_lang]['light'][1:], width=15, state="readonly")
-        self.light.grid(row=8, column=1, sticky=EW, padx=5, pady=2)
+        self.light.grid(row=8, column=1, sticky=E+W, padx=5, pady=2)
 
         Label(frame, text=self.language[self.cur_lang]['description'], anchor="w", justify="left") \
-            .grid(row=9, column=0, columnspan=2, sticky=EW, padx=5, pady=2)
+            .grid(row=9, column=0, columnspan=2, sticky=E+W, padx=5, pady=2)
         self.button = Button(frame, text=self.language[self.cur_lang]['save'])
         self.button.grid(row=10, column=0, columnspan=2, padx=5, pady=(2, 5))
 
@@ -604,25 +586,16 @@ class SurveyFrame(CustomFrame):
     def get_frame(self) -> Frame:
         return self.__frame
 
-    def configure(self, widgets_config: dict) -> None:
-        # TODO
-        pass
-
-    def set_lang(self, lang):
-        # TODO
-        pass
-
-    def set_button_action(self, command):
-        self.button.config(command=command)
-
 
 class LoadFrame(CustomFrame):
     language = {
         'ua': {
-            'load_notification': "Для проведення актуальних експериментів необхідно\nпідключення до мережі Інтернет " +
-                                 "(оновлення вимог,\nзавантаження зображень, відправка результатів)",
+            'load_notification': "Для проведення актуальних експериментів необхідно підключення до Інтернет\n" +
+                                 "(оновлення конфігурації, завантаження зображень, відправка результатів).\n" +
+                                 "Пряме послання на хмарне сховище:",
+            'link':"https://e.pcloud.link/publink/show?code=kZqDKsZ2AgMjJJTgpBAc2pfWpDzi55iOysX",
             'checkbutton': "Дозволити підключення до мережі Інтернет",
-            'exist': "Наявність тестових зображень:",
+            'exist': "Наявність тестових зображень (вибірково до 75 на кожний експеримент):",
             'load_single': "Завантажити для одного експерименту (до {:.1f} Мб)",
             'load_all': "Завантажити всі зображення (до {:.2f} Гб)",
             'load_button': "Завантажити",
@@ -642,43 +615,51 @@ class LoadFrame(CustomFrame):
         self.__frame = frame
         super()._layout(frame)
         self.labels = dict()
+        frame.grid_columnconfigure(0, weight=1, uniform="load_group")
+        frame.grid_columnconfigure(1, weight=1, uniform="load_group")
+        frame.grid_columnconfigure(2, weight=1, uniform="load_group")
+        frame.grid_columnconfigure(3, weight=1, uniform="load_group")
 
         Label(frame, text=self.language[self.cur_lang]['load_notification'], anchor="w", justify="left") \
-            .grid(row=0, column=0, columnspan=4, sticky=EW, padx=5, pady=2)
+            .grid(row=0, column=0, columnspan=4, sticky=E+W, padx=5, pady=(2, 0))
+
+        link = Label(frame, text=self.language[self.cur_lang]['link'], fg="blue", cursor="hand2", anchor="w", justify="left")
+        link.grid(row=1, column=0, columnspan=4, sticky=E+W, padx=5, pady=(0, 2))
+        link.bind("<Button-1>", lambda e: LoadFrame.callback(self.language[self.cur_lang]['link']))
 
         self.isinternet = IntVar(value=1)
         # self.isinternet.set(1)
         self.chk = Checkbutton(frame, text=self.language[self.cur_lang]['checkbutton'], variable=self.isinternet)
-        self.chk.grid(row=1, column=0, columnspan=4, sticky=W, padx=5, pady=2)
+        self.chk.grid(row=2, column=0, columnspan=4, sticky=W, padx=5, pady=2)
         # self.chk['command'] = lambda: self.get_check()
         # print(self.isinternet.get())
         # self.chk.toggle()
         # print(self.isinternet.get())
 
         Label(frame, text=self.language[self.cur_lang]['exist'], anchor="w", justify="left") \
-            .grid(row=2, column=0, columnspan=3, sticky=EW, padx=5, pady=2)
+            .grid(row=3, column=0, columnspan=4, sticky=E+W, padx=5, pady=2)
         self.progress = ttk.Progressbar(frame, orient="horizontal", length=100, value=0)
         # pb = ttk.Progressbar(root, mode="determinate")
-        self.progress.grid(row=3, column=0, columnspan=3, padx=5, pady=(2, 5), sticky=E + W)
+        self.progress.grid(row=4, column=0, columnspan=3, padx=5, pady=(2, 5), sticky=E + W)
         self.lbl1 = Label(frame, text=self.language[self.cur_lang]['progress'].format(0, 0, 0), anchor="w",
                           justify="left")
-        self.lbl1.grid(row=3, column=3, sticky=EW, padx=5, pady=(2, 5))
+        self.lbl1.grid(row=4, column=3, sticky=E+W, padx=5, pady=(2, 5))
 
         self.lbl2 = Label(frame, text=self.language[self.cur_lang]['load_single'].format(45), anchor="w",
                           justify="left")
-        self.lbl2.grid(row=4, column=0, columnspan=3, sticky=EW, padx=5, pady=2)
+        self.lbl2.grid(row=5, column=0, columnspan=3, sticky=E+W, padx=5, pady=2)
         self.load_1 = Button(frame, text=self.language[self.cur_lang]['load_button'])
-        self.load_1.grid(row=4, column=3, sticky=EW, padx=5, pady=(2, 5))
+        self.load_1.grid(row=5, column=3, sticky=E+W, padx=5, pady=(2, 5))
 
         self.lbl3 = Label(frame, text=self.language[self.cur_lang]['load_all'].format(1.7), anchor="w", justify="left")
-        self.lbl3.grid(row=5, column=0, columnspan=3, sticky=EW, padx=5, pady=2)
+        self.lbl3.grid(row=6, column=0, columnspan=3, sticky=E+W, padx=5, pady=2)
         self.load_all = Button(frame, text=self.language[self.cur_lang]['load_button'])
-        self.load_all.grid(row=5, column=3, sticky=EW, padx=5, pady=(2, 5))
+        self.load_all.grid(row=6, column=3, sticky=E+W, padx=5, pady=(2, 5))
 
         self.start = Button(frame, text=self.language[self.cur_lang]['start'], width=20)
-        self.start.grid(row=6, column=0, columnspan=2, sticky=EW, padx=5, pady=(5, 10))
+        self.start.grid(row=7, column=0, columnspan=2, sticky=NSEW, padx=5, pady=(5, 10))
         self.cancel = Button(frame, text=self.language[self.cur_lang]['cancel'], width=20)
-        self.cancel.grid(row=6, column=2, columnspan=2, sticky=EW, padx=5, pady=(5, 10))
+        self.cancel.grid(row=7, column=2, columnspan=2, sticky=NSEW, padx=5, pady=(5, 10))
         self.cancel['command'] = self.tk.destroy
 
     def get_check(self) -> int:
@@ -688,10 +669,9 @@ class LoadFrame(CustomFrame):
     def get_frame(self) -> Frame:
         return self.__frame
 
-    def configure(self, widgets_config: dict) -> None:
-        widgets = widgets_config.keys()
-        for widget in widgets:
-            getattr(self, widget).config(**widgets_config[widget])
+    @staticmethod
+    def callback(url):
+        webbrowser.open_new_tab(url)
 
 
 class ImageFrame(CustomFrame):
@@ -707,7 +687,8 @@ class ImageFrame(CustomFrame):
             'b5': "Далі >>",
             'notification': "Примітка: зір кожного індивідуальний і залежить від\nвіку, самопочуття, втоми, пристрою та інших факторів.\nТому результати тестів можуть відрізнятися.",
             'start': "Розпочати",
-            'save': "Зберегти"
+            'save': "Зберегти",
+            'title': "Visibility Test"
         },
         'en': {
             'b1': "Invisible distortions",
@@ -717,7 +698,8 @@ class ImageFrame(CustomFrame):
             'b5': "Next >>",
             'notification': "Note: everyone's vision is individual and\ndepends on age, health, fatigue, device and\nother factors. Therefore, test results may vary",
             'start': "Start",
-            'save': "Save"
+            'save': "Save",
+            'title': "Visibility Test"
         }
     }
     cur_lang = 'ua'
@@ -731,6 +713,8 @@ class ImageFrame(CustomFrame):
     def _layout(self, frame: Frame) -> None:
         self.__frame = frame
         super()._layout(frame)
+        self.tk.title(self.language[self.cur_lang]['title'])
+
         self.ref_canvas = ZoomedCanvas(frame, image=self.ref_img)
         self.ref_canvas.grid(row=1, column=0, padx=10, pady=2)
         self.dist_canvas = ZoomedCanvas(frame, image=self.dist_img)
@@ -741,7 +725,7 @@ class ImageFrame(CustomFrame):
         frame.bind("<Motion>", self.mouse_motion)
 
         fr1 = Frame(frame)
-        fr1.grid(row=0, column=0, columnspan=2, padx=6, pady=5, sticky=EW)
+        fr1.grid(row=0, column=0, columnspan=2, padx=6, pady=5, sticky=E+W)
         fr1.columnconfigure(1, weight=1)
         self.name = Label(fr1, text="Name", anchor="w", justify="left")
         self.name.grid(row=0, column=0, padx=(5, 10), pady=2, sticky=W)
@@ -753,7 +737,7 @@ class ImageFrame(CustomFrame):
         self.lang.grid(row=0, column=2, padx=5, pady=2, sticky=E)
 
         fr2 = Frame(frame, bd=2, relief=RIDGE)
-        fr2.grid(row=2, column=0, columnspan=2, padx=12, pady=5, sticky=EW)
+        fr2.grid(row=2, column=0, columnspan=2, padx=12, pady=5, sticky=E+W)
         fr2.grid_columnconfigure(0, weight=1)
         # fr2.grid_columnconfigure(1, weight=0)
         fr2.grid_columnconfigure(2, weight=1)
@@ -768,7 +752,7 @@ class ImageFrame(CustomFrame):
         self.b3.grid(row=0, column=2, padx=5, pady=2, sticky=W)
 
         fr3 = Frame(frame)
-        fr3.grid(row=3, column=0, columnspan=2, padx=6, pady=6, sticky=EW)
+        fr3.grid(row=3, column=0, columnspan=2, padx=6, pady=6, sticky=E+W)
         self.notification = Label(fr3, text=self.language[self.cur_lang]['notification'], anchor="w", justify="left")
         self.notification.grid(row=0, column=0, padx=(5, 10), pady=2, sticky=W)
         self.b4 = Button(fr3, text=self.language[self.cur_lang]['b4'], width=15, height=2)
@@ -854,8 +838,6 @@ class ImageFrame(CustomFrame):
         self.lang.bind('<<ComboboxSelected>>', lambda lang=self.lang.get().lower(): self.__select_lang(lang))
 
     def __select_lang(self, lang: str):
-        # def __select_lang(self, event):
-        # gui.imgFrame.set_lang(lang)
         lang = self.lang.get().lower()
         self.cur_lang = lang
         self.notification['text'] = self.language[self.cur_lang]['notification']
@@ -868,17 +850,8 @@ class ImageFrame(CustomFrame):
             self.language)[self.cur_lang]['b5']
         self.gui_link.cur_lang = lang
 
-    def configure(self, widgets_config: dict) -> None:
-        widgets = widgets_config.keys()
-
-        for widget in widgets:
-            getattr(self, widget).config(**widgets_config[widget])
-
-    # def get_data(self):
-    # return self.canvas.photoimg
 
     def mouse_motion(self, event):
-        # _thread.start_new_thread(self.canvas_zooming, (event,) )
         cx = 0
         cy = 0
         if isinstance(event.widget, Canvas):
@@ -913,7 +886,7 @@ class ZoomedCanvas(Canvas):
         self.photoimg = ImageTk.PhotoImage(image)
         w, h = image.size
         self.pilzoom = image.resize((w * 2, h * 2), Image.LANCZOS)
-        self.create_image(4, 4, image=self.photoimg, anchor=NW)
+        self.create_image(4, 4, image=self.photoimg, anchor=N+W)
         self.is_zoomed = False
 
     def canvas_zooming(self, event, cx, cy):
@@ -923,13 +896,13 @@ class ZoomedCanvas(Canvas):
 
             area = (cx, cy, cx + self.photoimg.width(), cy + self.photoimg.height())
             self.tmp = ImageTk.PhotoImage(self.pilzoom.crop(area))
-            self.create_image(4, 4, image=self.tmp, anchor=NW)
+            self.create_image(4, 4, image=self.tmp, anchor=N+W)
             # self.create_image(-cx, -cy, image=self.zoomimg, anchor=NW)
             self.is_zoomed = True
 
         else:
             if self.is_zoomed:
-                self.create_image(4, 4, image=self.photoimg, anchor=NW)
+                self.create_image(4, 4, image=self.photoimg, anchor=N+W)
                 self.is_zoomed = False
 
 
@@ -970,6 +943,10 @@ class Experiment:
         self.round = 0
         self.pairs = []
         self.results = []
+        self.returns: int = 0
+        self.begin_time: float = 0
+        self.end_time: float = 0
+        self.times = []
 
     def get_images_stats(self):
         # todo
@@ -983,6 +960,11 @@ class Experiment:
 
         if config:
             images = list(config['images'].keys())
+            if not self.gui.r_version:
+                self.gui.r_version = float(config['app_version'])
+            if self.gui.r_version > self.gui.version:
+                CustomDialog.ok_link_dialog(self.gui.tk, self.gui.cur_lang, 'newveriontitle',
+                                            'newversionmessage','newversionlink')
         else:
             images = list(filter(os.path.isfile, Path('images').glob('I*.bmp')))
 
@@ -999,6 +981,7 @@ class Experiment:
 
         self.pairs = list(pairs)
         self.results = [0] * self.rounds
+        self.times = [0.0] * self.rounds
         self.round = 0
 
         # todo prioritized distribution
@@ -1008,6 +991,7 @@ class Experiment:
         self.status = 'started'
         self.gui.imgFrame.configure({'b4': {'command': lambda: self.__previous_action()}})
         self.gui.imgFrame.configure({'b5': {'command': lambda: self.__next_action()}})
+        self.begin_time = time.time()
         self.__set_round(0)
         # todo
 
@@ -1028,6 +1012,10 @@ class Experiment:
         self.results[self.round] = self.gui.imgFrame.get_selection()
         print(self.results)
         if self.round < self.rounds - 1:
+            if self.returns > 0:
+                self.returns -= 1
+            if self.returns == 0:
+                self.times[self.round] = time.time()
             self.__set_round(self.round + 1)
 
     def __previous_action(self):
@@ -1036,6 +1024,7 @@ class Experiment:
         self.results[self.round] = self.gui.imgFrame.get_selection()
         print(self.results)
         if self.round > 0:
+            self.returns += 1
             self.__set_round(self.round - 1)
 
     def __b4_b5_options(self):
@@ -1046,34 +1035,51 @@ class Experiment:
 
 
     def __save_results(self):
+        self.end_time = time.time()
+        self.times[-1] = self.end_time
 
-        # name
-        # begin
-        # end
-        # dist: value
-        # imagecofig version
-        # soft version
+        saved_result = dict()
+        saved_result['name'] = YAML.read(list(filter(os.path.isfile, Path('results').glob('*survey.yaml')))[0])['name']
+        saved_result['start_time'] = self.__formatted_time('%Y-%m-%d %H:%M:%S', self.begin_time)
+        saved_result['end_time'] = self.__formatted_time('%Y-%m-%d %H:%M:%S', self.end_time)
+        saved_result['markers'] = [self.begin_time, self.end_time]
+        saved_result['rnd'] = random.randint(1000000, 9999999)
+        saved_result['conf_version'] = self.gui.conf_version
+        saved_result['app_version'] = self.gui.version
 
+        res = []
+        for i, p in enumerate(self.pairs):
+            res.append([p[0], self.results[i], self.times[i]])
+        print(res)
+        saved_result['results'] = res
 
-        # todo yaml
-        # todo upload
+        file_name = f"{saved_result['name']} {self.__formatted_time('%Y-%m-%d %H.%M.%S', self.begin_time)}.yaml"
+        YAML.write(saved_result, file_name, 'results')
+
+        Network.upload_file(saved_result['name'], file_name, 'results')
+        # to do yaml
+        # to do upload
         self.__clear()
-        self.gui.load_dialog(self.gui.tk)
+        CustomDialog.ok_dialog(self.gui.tk, self.gui.cur_lang, 'savetitle', 'savemessage')
+        self.gui.lock_buttons(True)
+        # self.gui.load_dialog(self.gui.tk)
+
+    @staticmethod
+    def __formatted_time(pattern: str, t: float) -> str:
+        return time.strftime(pattern, time.localtime(t))
 
     def __clear(self):
         self.round = 0
         self.pairs = []
         self.results = []
         self.status = 'none'
+        self.gui.imgFrame.set_selection(0)
+        # self.gui.imgFrame.set_ref_image(None)
+        self.returns = 0
+        self.begin_time = 0
+        self.end_time = 0
+        self.times = []
 
-
-    # def load_images(self):
-    #     # todo
-    #     pass
-    #
-    # def show_image(self):
-    #     # todo
-    #     pass
 
 
 class Demo(Experiment):
@@ -1134,7 +1140,9 @@ class CustomDialog:
                 'needloadmessage': "Необхідно завантажити відсутні\nзображення для початку експерименту",
                 'newveriontitle': "Оновлення програми",
                 'newversionmessage': "Опубліковано нову версію програми.\nБудь-ласка оновіть за посиланням:",
-                'newversionlink': ""
+                'newversionlink': "https://github.com/OlegIeremeiev/VisibilityTest",
+                'savetitle': "Збереження",
+                'savemessage': "Результат успішно збережено"
             },
             'en': {
                 'exit': "Exit",
@@ -1150,8 +1158,11 @@ class CustomDialog:
                 'noexpermessage': "Unable to run experiment, insufficient number of images",
                 'needloadtitle': "Download required",
                 'needloadmessage': "The missing images must be loaded to start the experiment",
-                'newveriontitle': "Оновлення програми",
-                'newversionmessage': "Опубліковано нову версію програми.\nБудь-ласка оновіть за посиланням:"
+                'newveriontitle': "Update the program",
+                'newversionmessage': "A new version of the program has been\npublished. Please update using the link:",
+                'newversionlink': "https://github.com/OlegIeremeiev/VisibilityTest",
+                'savetitle': "Saving",
+                'savemessage': "The result was saved successfully"
             }
         }
         return language[current_lang]
@@ -1167,7 +1178,7 @@ class CustomDialog:
         win = ModalDialog.create_dialog(parent_window, title=messages['exit'])
 
         Label(win, text=messages['exit_question']) \
-            .grid(column=0, row=0, columnspan=2, sticky=NS, padx=10, pady=2)
+            .grid(column=0, row=0, columnspan=2, sticky=N+S, padx=10, pady=2)
         Button(win, text=messages['yes'], command=parent_window.quit, width=5) \
             .grid(column=0, row=1, sticky=NSEW, padx=10, pady=5)
         Button(win, text=messages['no'], command=win.destroy, width=5) \
@@ -1185,9 +1196,26 @@ class CustomDialog:
         messages = CustomDialog._messages(language)
         win = ModalDialog.create_dialog(parent_window, title=messages[title_type])
         Label(win, text=messages[message_type]) \
-            .grid(column=0, row=0, sticky=NS, padx=10, pady=2)
+            .grid(column=0, row=0, sticky=N+S, padx=10, pady=2)
         Button(win, text=messages['yes'], command=win.destroy, width=5) \
-            .grid(column=0, row=1, sticky=NS, padx=10, pady=5)
+            .grid(column=0, row=1, sticky=N+S, padx=10, pady=5)
+
+    @staticmethod
+    def ok_link_dialog(parent_window: Tk | Toplevel | None, language, title_type: str, message_type: str, link_type: str):
+        messages = CustomDialog._messages(language)
+        win = ModalDialog.create_dialog(parent_window, title=messages[title_type])
+        Label(win, text=messages[message_type]) \
+            .grid(column=0, row=0, sticky=N+S, padx=10, pady=2)
+        link = Label(win, text=messages[link_type], fg="blue", cursor="hand2")
+        link.grid(column=0, row=1, sticky=N+S, padx=10, pady=2)
+        link.bind("<Button-1>", lambda e: (CustomDialog.callback(messages[link_type]),
+                                           win.destroy()))
+        Button(win, text=messages['yes'], command=win.destroy, width=5) \
+            .grid(column=0, row=2, sticky=N+S, padx=10, pady=5)
+
+    @staticmethod
+    def callback(url):
+        webbrowser.open_new_tab(url)
 
     @staticmethod
     def load_dialog(parent_window: Tk | Toplevel | None, language) -> Toplevel:
@@ -1249,6 +1277,7 @@ class Network:
         p = post.content
         with open(os.path.join(self.path, file_name), 'wb') as f:
             f.write(p)
+        # direct link: https://e.pcloud.link/publink/show?code=kZqDKsZ2AgMjJJTgpBAc2pfWpDzi55iOysX
 
     @staticmethod
     def upload_file(user_name, file_name: str, path: str) -> dict:
