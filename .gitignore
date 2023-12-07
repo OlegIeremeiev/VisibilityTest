@@ -5,3 +5,5 @@ results/
 .idea/
 .git/
 *.iml
+test*
+test/
