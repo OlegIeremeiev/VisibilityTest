@@ -3,12 +3,15 @@ import webbrowser
 from tkinter import Tk, Toplevel, Frame, Label, Button, Entry, StringVar, NSEW, N, S, E, W, \
     Canvas, RIDGE, DISABLED, NORMAL, END, Scale, IntVar, HORIZONTAL, Checkbutton, RAISED, SUNKEN, FLAT, Text, WORD
 from tkinter import ttk, font
+
+# import cv2
 import yaml
 import re
 import os
 import platform
 from pathlib import Path
 from PIL import Image, ImageTk
+
 from abc import ABC, abstractmethod
 import random
 import time
@@ -17,10 +20,10 @@ import requests
 
 class GUI:
     cur_lang = 'ua'
-    version = 0.3
-    conf_version: float
-    r_version: float = None
-    r_conf_version: float
+    version = '0.4'
+    conf_version: str = ''
+    r_version: str = ''
+    r_conf_version: str = ''
     is_loading: bool
     is_cancel: bool
 
@@ -135,20 +138,41 @@ class GUI:
                           list(config['references']))
             local_im = set([item.name for item in list(filter(os.path.isfile, Path('images').glob('I*.bmp')))])
 
-        load_list = list(set(dist_im) - set(local_im))
-        total = len(dist_im)
-        exist = total - len(load_list)
-        self.__sync_gui_update(exist, total, is_all)
-
-        # downloaded = asyncio.Queue(maxsize=5)
-        for item in load_list:
-            if self.is_cancel:
-                return
-
-            file_name = item
-            self.network.download_file(file_name, file_id=self.network.images[file_name]['fileid'])
-            exist += 1
+        # if internet download mistakes
+        re_download = True
+        while re_download:
+            load_list = list(set(dist_im) - set(local_im))
+            total = len(dist_im)
+            exist = total - len(load_list)
             self.__sync_gui_update(exist, total, is_all)
+
+            # downloaded = asyncio.Queue(maxsize=5)
+            for item in load_list:
+                if self.is_cancel:
+                    return
+
+                file_name = item
+                self.network.download_file(file_name, file_id=self.network.images[file_name]['fileid'])
+                exist += 1
+                self.__sync_gui_update(exist, total, is_all)
+
+            re_download = self.images_not_verified_and_deleted()
+            local_im = set([item.name for item in list(filter(os.path.isfile, Path('images').glob('I*.bmp')))])
+
+
+    @staticmethod
+    def images_not_verified_and_deleted() -> bool:
+        images = [item.name for item in list(filter(os.path.isfile, Path('images').glob('I*.bmp')))]
+        is_deleted = False
+        for i in images:
+            try:
+                Image.open(os.path.join('images', i), mode="r")
+            except:
+                os.remove(os.path.join('images', i))
+                print(f'deleted: {i}')
+                is_deleted = True
+        return is_deleted
+
 
     def __load_button_update(self, is_all: bool, text_type: str):
         if is_all:
@@ -180,25 +204,35 @@ class GUI:
         remote_config = list(map(lambda x: x[0], filter(None, remote_config)))
 
         local_config = list(filter(os.path.isfile, Path('images').glob('imageconf*.yaml')))
+
         if not local_config:
-            self.network.download_file(file_name=remote_config[0], file_id=self.network.yaml_files[remote_config[0]])
-            return
+            self.network.download_file(file_name=remote_config[0], file_id=self.network.yaml_files[remote_config[0]]['fileid'])
+            local_config = list(filter(os.path.isfile, Path('images').glob('imageconf*.yaml')))
+            print(f'Initial config download')
+            # return
 
         l_version = re.search(r'\d{1,2}\.\d{1,2}', local_config[0].name).group(0)
         r_version = re.search(r'\d{1,2}\.\d{1,2}', remote_config[0]).group(0)
-        self.conf_version = float(l_version)
-        self.r_conf_version = float(r_version)
+
+        self.conf_version = str(l_version)
+        self.r_conf_version = str(r_version)
 
         # modified time
-        lmtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(Path(local_config[0]).stat().st_mtime))
-        cloudtime = self.network.yaml_files[remote_config]['modified']
-        rmtime = time.strftime('%Y-%m-%d %H:%M:%S', time.strptime(cloudtime, '%a, %d %b %Y %H:%M:%S %z'))
+        l_mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(Path(local_config[0]).stat().st_mtime))
+        r_mtime = time.strftime('%Y-%m-%d %H:%M:%S', time.strptime(
+                                    self.network.yaml_files[remote_config[0]]['modified'],
+                                    '%a, %d %b %Y %H:%M:%S %z'))
 
-        if float(l_version) < float(r_version) or lmtime < rmtime:
+        if self.is_update(l_version, r_version) or l_mtime < r_mtime:
+            # float(l_version) < float(r_version)
+            i = 0
+            while os.path.isfile(os.path.join('images', f'{local_config[0].name}.bak{i}')):
+                i += 1
             os.rename(os.path.join('images', local_config[0].name),
-                      os.path.join('images', local_config[0].name + '.bak'))
+                      os.path.join('images', local_config[0].name + f'.bak{i}'))
             # await
-            self.network.download_file(file_name=remote_config[0], file_id=self.network.yaml_files[remote_config[0]])
+            self.network.download_file(file_name=remote_config[0], file_id=self.network.yaml_files[remote_config[0]]['fileid'])
+            print(f'Config update to "{remote_config[0]}"')
 
     def __get_downloadable_list(self) -> (list[str], list[str]):
         if self.experiment.status != 'init':
@@ -289,6 +323,23 @@ class GUI:
         win.destroy()
         # self.experiment.mode == "demo" / "full"
         self.experiment.start_experiment()
+
+    @staticmethod
+    def is_update(local_version: str, remote_version: str) -> bool:
+        """
+        Comparison method between versions
+        :param local_version:
+        :param remote_version:
+        :return: True if remote_version > local_version, False if they are equal or remote_version is less
+        """
+        val1 = local_version.split('.')
+        val2 = remote_version.split('.')
+        compare = False
+        for i in range(len(val1)):
+            compare = True if int(val2[i]) > int(val1[i]) else False
+            if compare:
+                return compare  # only True for update
+        return compare  # do not need to update
 
 
 class CustomFrame(ABC):
@@ -768,13 +819,24 @@ class ImageFrame(CustomFrame):
 
     def set_ref_image(self, image_name: str) -> None:
         path = os.path.join(self.impath, image_name)
-        self.ref_img = Image.open(path, mode='r')
-        self.ref_canvas.set_image(self.ref_img)
+        try:
+        # self.dist_img = Image.fromarray(cv2.imread(path))
+            self.ref_img = Image.open(path, mode='r')
+            self.ref_canvas.set_image(self.ref_img)
+        except:
+            print(f"Error in load: {image_name}")
+            CustomDialog.error_dialog(self.tk, self.cur_lang, image_name)
+
 
     def set_dist_image(self, image_name: str) -> None:
         path = os.path.join(self.impath, image_name)
-        self.dist_img = Image.open(path, mode='r')
-        self.dist_canvas.set_image(self.dist_img)
+        try:
+            # self.dist_img = Image.fromarray(cv2.imread(path))
+            self.dist_img = Image.open(path, mode='r')
+            self.dist_canvas.set_image(self.dist_img)
+        except Exception as e:
+            print(f"Error in load: {image_name}, {str(e)}")
+            CustomDialog.error_dialog(self.tk, self.cur_lang, image_name)
 
     def get_frame(self) -> Frame:
         return self.__frame
@@ -886,7 +948,7 @@ class Experiment:
         self.gui = gui
         self.status = 'none'
         self.mode = 'none'
-        self.rounds = 10
+        self.rounds = 50
         self.round = 0
         self.pairs = []
         self.results = []
@@ -931,8 +993,8 @@ class Experiment:
         if config:
             images = list(config['images'].keys())
             if not self.gui.r_version:
-                self.gui.r_version = float(config['app_version'])
-            if self.gui.r_version > self.gui.version:
+                self.gui.r_version = str(config['app_version'])
+            if self.gui.is_update(self.gui.version, self.gui.r_version):  # if self.gui.r_version > self.gui.version:
                 CustomDialog.ok_link_dialog(self.gui.tk, self.gui.cur_lang, 'newveriontitle',
                                             'newversionmessage', 'newversionlink')
         else:
@@ -1034,7 +1096,6 @@ class Experiment:
         res = []
         for i, p in enumerate(self.pairs):
             res.append([p[0], self.results[i], self.times[i]])
-        print(res)
         saved_result['results'] = res
 
         file_name = f"{saved_result['name']} {self.__formatted_time('%Y-%m-%d %H.%M.%S', self.begin_time)}.yaml"
@@ -1066,6 +1127,7 @@ class Experiment:
 
 
 class Demo(Experiment):
+    # todo
     pass
 
 
@@ -1124,6 +1186,8 @@ class CustomDialog:
                 'newveriontitle': "Оновлення програми",
                 'newversionmessage': "Опубліковано нову версію програми.\nБудь-ласка оновіть за посиланням:",
                 'newversionlink': "https://github.com/OlegIeremeiev/VisibilityTest",
+                'errorloadtitle': "Помилка завантаження",
+                'errorloadmessage': "Помилка завантаження зображення {}",
                 'savetitle': "Збереження",
                 'savemessage': "Результат успішно збережено",
                 'instructiontitle': "Інструкція",
@@ -1245,6 +1309,15 @@ class CustomDialog:
         but = Button(win, text=messages['yes'], command=win.destroy, width=5)
         but.grid(column=0, row=1, sticky=N + S, padx=10, pady=5)
         text['bg'] = but['bg']
+
+    @staticmethod
+    def error_dialog(parent_window: Tk | Toplevel | None, language, error_image: str):
+        messages = CustomDialog._messages(language)
+        win = ModalDialog.create_dialog(parent_window, title=messages['errorloadtitle'])
+        Label(win, text=(messages['errorloadmessage']).format(error_image)) \
+            .grid(column=0, row=0, sticky=N + S, padx=10, pady=2)
+        Button(win, text=messages['yes'], command=win.destroy, width=5) \
+            .grid(column=0, row=1, sticky=N + S, padx=10, pady=5)
 
 
 class YAML:
