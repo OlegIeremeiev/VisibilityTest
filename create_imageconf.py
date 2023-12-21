@@ -10,7 +10,7 @@ class ImageRegulator:
 
     def __init__(self):
         data = dict()
-        data['version'] = 0.3
+        data['version'] = 0.4
         data['app_version'] = 0.3
         data['limit'] = 30
 
@@ -89,8 +89,12 @@ class ImageRegulator:
 class YAML:
     @staticmethod
     def read(name: str, path: str = "") -> dict:
-        with open(os.path.join(path, name), 'r') as file:
-            data = yaml.safe_load(file)
+        try:
+            with open(os.path.join(path, name), 'r') as file:
+                data = yaml.safe_load(file)
+        except UnicodeDecodeError:
+            with open(os.path.join(path, name), 'r', encoding='windows-1251') as file:
+                data = yaml.safe_load(file)
         return data
 
     @staticmethod
